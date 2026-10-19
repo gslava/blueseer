@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 ###  This script essentially does three things :
 ###  1) creates database schema
 ###  2) creates user 'bs_user' with password
@@ -34,21 +36,31 @@ echo "Read the comments in this script for determining this setting "
 echo ""
 echo ""
 echo ""
+echo -n "Previous Data will be lost... are you sure you want to install database? (enter: yes or no): "
+read -r confirm
+if [[ "$confirm" != "yes" ]]; then
+    exit 0
+fi
+
 echo -n "Enter the IP addr of database server: 'localhost' default=localhost: "
-read IP
+read -r IP
 
 if [[ "$IP" == "" ]]; then
 	IP=$defaulthost
 fi
 
 echo -n "Enter the administrator password for the MySQL Database: "
-read PASS
+IFS= read -r -s PASS
 echo ""
 echo ""
 echo -n "Enter database name (Default = bsdb): "
-read DB
+read -r DB
 if [[ "$DB" == "" ]]; then
 	DB="bsdb"
+fi
+if [[ ! "$DB" =~ ^[a-zA-Z0-9_]+$ || ${#DB} -gt 64 ]]; then
+    echo "Database name must contain 1-64 letters, digits or underscores." >&2
+    exit 1
 fi
 echo ""
 echo ""
@@ -59,9 +71,9 @@ echo "es=spanish"
 echo "tr=turkish"
 echo "de=german"
 echo -n "Enter the two character language code (en, es, fr, etc) default=en: "
-read LANG
+read -r LANG
 
-if [ ${#LANG} -ge 3 ]; then echo "you entered more than two characters...try again"; exit
+if [ ${#LANG} -ge 3 ]; then echo "you entered more than two characters...try again"; exit 1
 else
 	echo "you enter $LANG ...proceeding"
 fi
@@ -71,7 +83,11 @@ if [[ "$LANG" == "" ]]; then
 	LANG=$defaultlang
 fi
 
-LANG=$(echo $LANG | tr '[:upper:]' '[:lower:]')
+LANG=$(printf '%s' "$LANG" | tr '[:upper:]' '[:lower:]')
+if [[ ! "$LANG" =~ ^[a-z][a-z]$ || ! -f "data/$LANG/sq_mysql.txt" || ! -f data/blueseer.schema ]]; then
+    echo "Missing schema or language data for $LANG; run from the installation directory." >&2
+    exit 1
+fi
 
 COUNTRY="US"
 if [[ "$LANG" == "es" ]]; then
@@ -86,12 +102,28 @@ fi
 if [[ "$LANG" == "de" ]]; then
 	COUNTRY="DE"
 fi
+if [[ "$LANG" == "ro" ]]; then
+	COUNTRY="RO"
+fi
+if [[ "$LANG" == "it" ]]; then
+	COUNTRY="IT"
+fi
 
 
-ROOT=root
-
-MYSQL_PWD=$PASS
-export MYSQL_PWD
+# Keep credentials out of the process arguments and environment. An absolute
+# filename remains valid when loading the language data from a subdirectory.
+umask 077
+mysql_defaults=$(mktemp "${TMPDIR:-/tmp}/blueseer-mysql.XXXXXX")
+trap 'rm -f "$mysql_defaults"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+mysql_password=${PASS//\\/\\\\}
+mysql_password=${mysql_password//\"/\\\"}
+mysql_password=${mysql_password//$'\t'/\\t}
+mysql_password=${mysql_password//$'\r'/\\r}
+printf '[client]\npassword="%s"\n' "$mysql_password" > "$mysql_defaults"
+unset PASS mysql_password MYSQL_PWD
+mysql_options=(--defaults-extra-file="$mysql_defaults" --host="$IP" --user=root)
 
 echo ""
 echo ""
@@ -109,19 +141,19 @@ echo "COUNTRY=$COUNTRY" >>bs.cfg
 cd data
 
 echo "creating database schema for database $DB...."
-mysql -e "drop database if exists $DB;" -u $ROOT  
-mysql -e "create database if not exists $DB character set utf8mb4 collate utf8mb4_unicode_ci;" -u $ROOT  
-mysql -e "drop user if exists 'bs_user'@'%' ;" -u $ROOT 
-mysql -e "create user if not exists 'bs_user'@'%' identified by 'bsPasswd';" -u $ROOT
-mysql -e "grant select,insert,delete,update on bsdb.* to 'bs_user'@'%';"  -u $ROOT
-mysql -e "set global local_infile = 'ON';" -u $ROOT
+mysql "${mysql_options[@]}" -e "drop database if exists \`$DB\`;"
+mysql "${mysql_options[@]}" -e "create database if not exists \`$DB\` character set utf8mb4 collate utf8mb4_unicode_ci;"
+mysql "${mysql_options[@]}" -e "drop user if exists 'bs_user'@'%' ;"
+mysql "${mysql_options[@]}" -e "create user if not exists 'bs_user'@'%' identified by 'bsPasswd';"
+mysql "${mysql_options[@]}" -e "grant select,insert,delete,update on \`$DB\`.* to 'bs_user'@'%';"
+mysql "${mysql_options[@]}" -e "set global local_infile = 'ON';"
 
 #  The next line loads the database and table definitions
-mysql --local-infile=1 $DB -u $ROOT  <blueseer.schema 
+mysql "${mysql_options[@]}" --local-infile=1 "$DB" <blueseer.schema
 
 echo "Loading some data....."
-cd $LANG
-mysql --local-infile=1 $DB -u $ROOT <sq_mysql.txt
+cd "$LANG"
+mysql "${mysql_options[@]}" --local-infile=1 "$DB" <sq_mysql.txt
 cd ..
 
 
@@ -147,5 +179,3 @@ echo 'NOTE:'
 echo 'login and password are admin and admin respectively'
 echo ''
 echo ''
-
-unset MYSQL_PWD
