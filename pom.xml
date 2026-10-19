@@ -503,6 +503,34 @@
   </dependencies>
 
 <profiles>
+  <profile>
+    <id>macos-aarch64</id>
+    <activation>
+      <os>
+        <family>mac</family>
+        <arch>aarch64</arch>
+      </os>
+    </activation>
+    <properties>
+      <swt.groupId>org.eclipse.platform</swt.groupId>
+      <swt.artifactId>org.eclipse.swt.cocoa.macosx.aarch64</swt.artifactId>
+      <swt.version>3.129.0</swt.version>
+    </properties>
+  </profile>
+  <profile>
+    <id>macos-x86_64</id>
+    <activation>
+      <os>
+        <family>mac</family>
+        <arch>x86_64</arch>
+      </os>
+    </activation>
+    <properties>
+      <swt.groupId>org.eclipse.platform</swt.groupId>
+      <swt.artifactId>org.eclipse.swt.cocoa.macosx.x86_64</swt.artifactId>
+      <swt.version>3.129.0</swt.version>
+    </properties>
+  </profile>
   <profile>  
     <id>windows</id>
     <activation>
